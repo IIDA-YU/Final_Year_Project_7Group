@@ -15,6 +15,7 @@ from algorithm.mapping.roaming_map import RoamingMap
 from camera.camera_adjustment import CameraAdjustment, KEY_HELP, prepare_color_frame
 from camera.learning_data_check import LearningDataDetector
 from hardware.battery import draw_battery
+from telecommunication.session import EncounterCommSession
 
 
 WINDOW_NAME = "Cozmo Camera"
@@ -22,8 +23,8 @@ DISPLAY_SIZE = (640, 480)  # 元の表示サイズを維持する。
 IMAGE_TIMEOUT = 15
 
 
-def show_camera(robot, drive=None, show_map=False):
-    """Cozmoの映像を表示し、指定に応じて走行やマップ表示も行う。"""
+def show_camera(robot, drive=None, show_map=False, telecom_config=None):
+    """Cozmoの映像を表示し、指定に応じて走行・マップ表示・相互通信も行う。"""
     print("学習済みモデルを読み込んでいます。")
     detector = LearningDataDetector()
     adjustment = CameraAdjustment(robot)
@@ -48,13 +49,19 @@ def show_camera(robot, drive=None, show_map=False):
     processed_at = None
     last_status = None
     resources = ExitStack()
+    map_data = None
     map_window = None
+    comm_session = None
 
     try:
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
         if show_map:
             map_data = resources.enter_context(RoamingMap(robot))
             map_window = MapWindow(map_data, WINDOW_NAME, DISPLAY_SIZE[0])
+        if telecom_config is not None:
+            comm_session = resources.enter_context(
+                EncounterCommSession(robot, config=telecom_config, map_data=map_data)
+            )
         robot.enable_camera(enable=True, color=True)
         adjustment.start()
         started_at = time.monotonic()
@@ -89,9 +96,13 @@ def show_camera(robot, drive=None, show_map=False):
                 detected_frame = detector.detect_and_draw(frame)
                 processed_at = received_at
 
-            # バッテリー表示が積み重ならないようコピーする。
+            # バッテリー表示・ArUco枠が積み重ならないようコピーする。
+            frame = detected_frame.copy()
+            if comm_session is not None:
+                comm_session.draw_on_image(frame)
+
             frame = draw_battery(
-                detected_frame.copy(),
+                frame,
                 robot.battery_voltage,
             )
 
@@ -133,7 +144,7 @@ def show_camera(robot, drive=None, show_map=False):
     finally:
         # 一部の後始末に失敗しても、残りを必ず試みる。
         cleanup_steps = (
-            ("机上走行の停止とマップの保存", resources.close),
+            ("走行・マップ・相互通信の停止", resources.close),
             ("自動露光の復帰", adjustment.close),
             ("カメラの停止", lambda: robot.enable_camera(enable=False)),
             ("画像ハンドラーの解除", lambda: robot.del_handler(event, handler)),
