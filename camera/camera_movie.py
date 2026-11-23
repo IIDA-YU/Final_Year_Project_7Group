@@ -10,11 +10,11 @@ import numpy as np
 import pycozmo
 from PIL import Image, ImageDraw
 
+from algorithm.mapping.map_view import MapWindow
+from algorithm.mapping.roaming_map import RoamingMap
 from camera.camera_adjustment import CameraAdjustment, KEY_HELP, prepare_color_frame
 from camera.learning_data_check import LearningDataDetector
 from hardware.battery import draw_battery
-from mapping.map_view import MapWindow
-from mapping.roaming_map import RoamingMap
 
 
 WINDOW_NAME = "Cozmo Camera"

@@ -10,8 +10,8 @@ from threading import Lock
 from pycozmo.event import EvtRobotStateUpdated
 from pycozmo.robot import RobotStatusFlag
 
+from algorithm.mapping.table_bounds import EdgeHit, TableBounds, estimate_table
 from hardware.step_detection import UNSAFE_STATUS
-from mapping.table_bounds import EdgeHit, TableBounds, estimate_table
 
 
 TRAIL_INTERVAL_MM = 8.0
