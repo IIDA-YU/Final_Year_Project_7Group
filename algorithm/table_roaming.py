@@ -29,11 +29,16 @@ class _StopRequested(Exception):
     """カメラ画面を閉じたときに走行ループを抜ける。"""
 
 
-@contextmanager
 def roam_table(robot):
+    """段差を記録するための探索走行を開始する。"""
+    return drive_in_background(robot, _explore)
+
+
+@contextmanager
+def drive_in_background(robot, drive):
     """カメラ表示中は別スレッドで走行し、画面を閉じると終了する。"""
     stop_requested = Event()
-    worker = Thread(target=_drive, args=(robot, stop_requested))
+    worker = Thread(target=_drive, args=(robot, stop_requested, drive))
     worker.start()
     try:
         yield
@@ -42,7 +47,7 @@ def roam_table(robot):
         worker.join()
 
 
-def _drive(robot, stop_requested):
+def _drive(robot, stop_requested, drive):
     try:
         robot.stop_all_motors()
         with StepDetector(robot) as detector:
@@ -63,14 +68,15 @@ def _drive(robot, stop_requested):
                     raise RuntimeError("Cozmoの座標の基準が変わりました。")
                 return state
 
-            _explore(robot, read)
+            try:
+                drive(robot, read)
+            finally:
+                robot.stop_all_motors()
     except _StopRequested:
         pass
     except Exception as exc:
         if not stop_requested.is_set():
             print(f"机上走行を終了しました。{exc}", file=sys.stderr)
-    finally:
-        robot.stop_all_motors()
 
 
 def _explore(robot, read):
@@ -108,7 +114,7 @@ def _explore(robot, read):
         last_cliff_position = state.position
         cliff_headings.append(state.heading_deg)
         backup_distance = BACKUP_DISTANCE_MM + 20.0 * min(len(turns), 2)
-        state = _pause(read)
+        state = wait_for_braking(read)
         state = _back_up(robot, read, state, forward_start, backup_distance)
 
         direction, angle = _choose_turn(
@@ -116,7 +122,7 @@ def _explore(robot, read):
         )
         direction_name = "左" if direction == 1 else "右"
         print(f"段差を検知。後退後、{direction_name}へ{angle}度旋回します。")
-        state = _turn(robot, read, state, direction, angle)
+        state = turn_in_place(robot, read, state, direction, angle)
         turns.append((direction, angle, state.heading_deg))
 
 
@@ -137,7 +143,7 @@ def _back_up(robot, read, state, forward_start, desired_distance):
             raise RuntimeError("後退に必要な距離へ到達できませんでした。")
 
     robot.stop_all_motors()
-    state = _pause(read)
+    state = wait_for_braking(read)
     if state.cliff_detected:
         raise RuntimeError("後退後も段差を検知しています。")
     return state
@@ -164,7 +170,7 @@ def _choose_turn(heading, turns, cliff_headings, initial_direction):
     raise RuntimeError("同じ角で試せる旋回先が見つかりませんでした。")
 
 
-def _turn(robot, read, state, direction, angle):
+def turn_in_place(robot, read, state, direction, angle):
     previous_heading = state.heading_deg
     turned = 0.0
     deadline = monotonic() + TURN_TIMEOUT_SECONDS
@@ -185,10 +191,10 @@ def _turn(robot, read, state, direction, angle):
             raise RuntimeError("指定した方向・角度へ旋回できませんでした。")
 
     robot.stop_all_motors()
-    return _pause(read, require_clear=True)
+    return wait_for_braking(read, require_clear=True)
 
 
-def _pause(read, require_clear=False):
+def wait_for_braking(read, require_clear=False):
     deadline = monotonic() + BRAKE_SECONDS
     while True:
         state = read()

@@ -149,13 +149,7 @@ def _make_bounds(angle, sides):
     u_size = _opposite_distance(u_low, u_high)
     v_size = _opposite_distance(v_low, v_high)
     if u_size is not None and v_size is not None:
-        corners = (
-            world(-u_low.offset, -v_low.offset),
-            world(u_high.offset, -v_low.offset),
-            world(u_high.offset, v_high.offset),
-            world(-u_low.offset, v_high.offset),
-        )
-        segments = tuple((corners[i], corners[(i + 1) % 4]) for i in range(4))
+        return rectangle_bounds(angle, -u_low.offset, u_high.offset, -v_low.offset, v_high.offset)
     else:
         segments = []
         for (axis, sign), side in zip(SIDES, sides):
@@ -169,6 +163,17 @@ def _make_bounds(angle, sides):
         segments = tuple(segments)
 
     return TableBounds(segments, u_size, v_size, angle if segments else None)
+
+
+def rectangle_bounds(angle, u_min, u_max, v_min, v_max):
+    """机に平行な軸上の4辺を、保存・描画に使う線分に変換する。"""
+    c, s = cos(radians(angle)), sin(radians(angle))
+    corners = tuple(
+        (u * c - v * s, u * s + v * c)
+        for u, v in ((u_min, v_min), (u_max, v_min), (u_max, v_max), (u_min, v_max))
+    )
+    segments = tuple((corners[i], corners[(i + 1) % 4]) for i in range(4))
+    return TableBounds(segments, u_max - u_min, v_max - v_min, angle)
 
 
 def _opposite_distance(low, high):

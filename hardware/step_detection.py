@@ -25,6 +25,7 @@ class StepReading:
     position: tuple[float, float]
     heading_deg: float
     pose_frame: tuple[int, int]
+    received_at: float
 
 
 class StepDetector:
@@ -75,4 +76,5 @@ class StepDetector:
             position=(x, y),
             heading_deg=heading,
             pose_frame=(pose.origin_id, frame_id),
+            received_at=received_at,
         )

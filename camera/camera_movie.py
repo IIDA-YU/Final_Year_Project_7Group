@@ -23,7 +23,7 @@ DISPLAY_SIZE = (640, 480)  # 元の表示サイズを維持する。
 IMAGE_TIMEOUT = 15
 
 
-def show_camera(robot, drive=None, show_map=False, telecom_config=None):
+def show_camera(robot, drive=None, show_map=False, telecom_config=None, *, map_data=None):
     """Cozmoの映像を表示し、指定に応じて走行・マップ表示・相互通信も行う。"""
     print("学習済みモデルを読み込んでいます。")
     detector = LearningDataDetector()
@@ -49,14 +49,14 @@ def show_camera(robot, drive=None, show_map=False, telecom_config=None):
     processed_at = None
     last_status = None
     resources = ExitStack()
-    map_data = None
     map_window = None
     comm_session = None
 
     try:
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
-        if show_map:
+        if show_map and map_data is None:
             map_data = resources.enter_context(RoamingMap(robot))
+        if show_map:
             map_window = MapWindow(map_data, WINDOW_NAME, DISPLAY_SIZE[0])
         if telecom_config is not None:
             comm_session = resources.enter_context(

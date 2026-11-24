@@ -1,23 +1,22 @@
 """Cozmoの走行軌跡と、段差を検知した位置を記録する。"""
 
-from dataclasses import asdict
-from datetime import datetime
-import json
-from math import cos, hypot, isfinite, sin
-from pathlib import Path
+from math import cos, degrees, hypot, isfinite, sin
 from threading import Lock
 
 from pycozmo.event import EvtRobotStateUpdated
 from pycozmo.robot import RobotStatusFlag
 
 from algorithm.mapping.table_bounds import EdgeHit, TableBounds, estimate_table
+from data.roaming_map_files import (
+    MAP_DIRECTORY,
+    SENSOR_FORWARD_MM,
+    TRAIL_INTERVAL_MM,
+    save_roaming_map,
+)
 from hardware.step_detection import UNSAFE_STATUS
 
 
-TRAIL_INTERVAL_MM = 8.0
 EDGE_MERGE_MM = 25.0
-SENSOR_FORWARD_MM = 35.0  # 機体座標の原点から前方のセンサーまでの概算値。
-MAP_DIRECTORY = Path("data") / "roaming_maps"
 
 
 class RoamingMap:
@@ -25,6 +24,7 @@ class RoamingMap:
         self.robot = robot
         self._lock = Lock()
         self._origin = None
+        self._start_heading = None
         self._frame = None
         self._trail = []
         self._edges = []
@@ -67,6 +67,7 @@ class RoamingMap:
 
             if self._origin is None:
                 self._origin = (x, y)
+                self._start_heading = degrees(heading)
                 self._frame = frame
             elif frame != self._frame:
                 # 座標の基準が変わったら、最後の有効な地図を保持する。
@@ -143,22 +144,10 @@ class RoamingMap:
         if not trail:
             return
 
-        MAP_DIRECTORY.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        path = MAP_DIRECTORY / f"roaming_map_{timestamp}.json"
-        temporary = path.with_suffix(".tmp")
-        data = {
-            "sensor_forward_mm": SENSOR_FORWARD_MM,
-            "trail_mm": trail,
-            "detected_edges_mm": edges,
-            "table_bounds": asdict(self.table_bounds()),
-        }
-        try:
-            temporary.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-            temporary.replace(path)
-        finally:
-            temporary.unlink(missing_ok=True)
-        print(f"走行マップを保存しました。{path}")
+        save_roaming_map(
+            MAP_DIRECTORY, trail, edges, self.table_bounds(),
+            start_heading=self._start_heading, sensor_forward=SENSOR_FORWARD_MM,
+        )
 
 
 def _distance(point_a, point_b):
