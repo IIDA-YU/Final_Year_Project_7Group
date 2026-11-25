@@ -1,9 +1,9 @@
 """実走行用に学習マップを読み込み、画面に表示する走行軌跡を記録する。"""
 
-from math import atan2, cos, degrees, dist, radians, sin
+from math import atan2, degrees, dist, radians
 from threading import Lock
 
-from algorithm.mapping.drive_limits import TableArea
+from algorithm.mapping.drive_limits import TableArea, heading_vector
 from algorithm.mapping.table_bounds import TableBounds
 from data.roaming_map_files import (
     SENSOR_FORWARD_MM,
@@ -28,8 +28,8 @@ class DriveMap:
         self.table = TableArea.from_map(saved, angle)
         self._bounds = TableBounds(tuple(saved.segments), saved.axis_u_mm, saved.axis_v_mm, angle)
 
-        self._sensor_forward = number(data.get("sensor_forward_mm", SENSOR_FORWARD_MM), "センサーの位置")
-        if self._sensor_forward <= 0:
+        self.sensor_forward_mm = number(data.get("sensor_forward_mm", SENSOR_FORWARD_MM), "センサーの位置")
+        if self.sensor_forward_mm <= 0:
             raise ValueError("センサーの位置は正の数で指定してください。")
 
         self._lock = Lock()
@@ -38,11 +38,14 @@ class DriveMap:
         self._pose = None
         self._paused = False
 
+    def sensor_position(self, position, heading):
+        x, y = position
+        dx, dy = heading_vector(heading)
+        return (x + self.sensor_forward_mm * dx, y + self.sensor_forward_mm * dy)
+
     def record_cliff(self, position, heading):
         """実走行中の検知点をマップ画面に表示する。"""
-        angle = radians(heading)
-        x, y = position
-        edge = (x + self._sensor_forward * cos(angle), y + self._sensor_forward * sin(angle))
+        edge = self.sensor_position(position, heading)
         with self._lock:
             self._edges.append(edge)
 

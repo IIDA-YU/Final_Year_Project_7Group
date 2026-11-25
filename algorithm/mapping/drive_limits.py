@@ -73,13 +73,13 @@ class TableArea:
         u, v = rotate_point(position, -self.angle_deg)
         return (u - self.u_min, self.u_max - u, v - self.v_min, self.v_max - v)
 
-    def approaching_edge(self, position, heading):
-        """今の向きで最初に達する辺を返す。"""
+    def approaching_edge(self, position, heading, *, inset_mm=0.0):
+        """最初に達する辺と、その辺から指定距離だけ内側の線までの走行距離を返す。"""
         du, dv = heading_vector(heading - self.angle_deg)
         normal_angles = (self.angle_deg + 180, self.angle_deg, self.angle_deg - 90, self.angle_deg + 90)
-        # 学習時との位置ずれを考慮し、推定した辺を越えていても外向きなら判定する。
+        # 内側の線を越えていてさらに外向きなら、走行距離は0とする。
         approaches = (
-            EdgeApproach(max(0.0, clearance) / speed, clearance, normal)
+            EdgeApproach(max(0.0, clearance - inset_mm) / speed, clearance, normal)
             for clearance, speed, normal in zip(self.clearances(position), (-du, du, -dv, dv), normal_angles)
             if speed > 1e-6
         )
