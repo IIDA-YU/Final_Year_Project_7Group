@@ -12,10 +12,11 @@ from telecommunication.pc_communication import CoordCommunication
 class EncounterCommSession:
     """with ブロックの間だけ相互通信関連モジュールを起動し、終了時にすべて停止する。"""
 
-    def __init__(self, robot, config=None, map_data=None):
+    def __init__(self, robot, config=None, map_data=None, *, track_camera=True):
         self.robot = robot
         self.config = config if config is not None else TELECOM_CONFIG
         self.map_data = map_data
+        self.track_camera = track_camera
         self.comm = None
         self.aruco_tracker = None
         self.coord_sender = None
@@ -50,6 +51,7 @@ class EncounterCommSession:
             robot_id=self.config.robot_id,
             get_local_info_cb=self.get_my_pose,
         )
+        CoordCommunication.register_robot_context(cli=self.robot)
         threading.Thread(
             target=self.comm.start_server,
             name="CoordinateReceiver",
@@ -58,18 +60,8 @@ class EncounterCommSession:
         time.sleep(0.3)
 
         # 2. ArUcoマーカーによるすれ違い自動通信を起動
-        self.aruco_tracker = ArucoCoordinateTracker(
-            cli=self.robot,
-            target_ip_dict=self.config.target_addr_dict,
-            comm=self.comm,
-            robot_id=self.config.robot_id,
-            cooldown_sec=self.config.cooldown_sec,
-            get_pose_cb=self.get_my_pose,
-            marker_real_size_mm=self.config.marker_real_size_mm,
-            focal_length_px=self.config.focal_length_px,
-            encounter_dist_max_mm=self.config.encounter_dist_max_mm,
-        )
-        self.aruco_tracker.start()
+        if self.track_camera:
+            self.start_tracking()
 
         # 3. 定期送信先が指定されている場合のみ CoordinateSender を起動
         if self.config.periodic_target_addr:
@@ -85,6 +77,25 @@ class EncounterCommSession:
 
         return self
 
+    def start_tracking(self):
+        if self.aruco_tracker is None:
+            self.aruco_tracker = ArucoCoordinateTracker(
+                cli=self.robot,
+                target_ip_dict=self.config.target_addr_dict,
+                comm=self.comm,
+                robot_id=self.config.robot_id,
+                cooldown_sec=self.config.cooldown_sec,
+                get_pose_cb=self.get_my_pose,
+                marker_real_size_mm=self.config.marker_real_size_mm,
+                focal_length_px=self.config.focal_length_px,
+                encounter_dist_max_mm=self.config.encounter_dist_max_mm,
+            )
+        self.aruco_tracker.start()
+
+    def stop_tracking(self):
+        if self.aruco_tracker is not None:
+            self.aruco_tracker.stop()
+
     def draw_on_image(self, frame):
         if self.aruco_tracker is not None:
             return self.aruco_tracker.draw_on_image(frame)
@@ -96,11 +107,10 @@ class EncounterCommSession:
                 self.coord_sender.stop()
             except Exception:
                 pass
-        if self.aruco_tracker is not None:
-            try:
-                self.aruco_tracker.stop()
-            except Exception:
-                pass
+        try:
+            self.stop_tracking()
+        except Exception:
+            pass
         if self.comm is not None:
             try:
                 self.comm.stop()

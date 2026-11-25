@@ -1,12 +1,17 @@
-"""推定した長方形を基に、机の縁まで走れる距離を計算する。"""
+"""学習マップから、進行方向にある机の辺を求める。"""
 
 from dataclasses import dataclass
 from math import cos, radians, sin
 
 
-SIDE_NAMES = ("u_min", "u_max", "v_min", "v_max")
 FIT_TOLERANCE_MM = 1.0
-STOP_AHEAD_MM = 6.0  # 状態の受信間隔と、停止するまでの移動分を見込む。
+
+
+@dataclass(frozen=True)
+class EdgeApproach:
+    travel_mm: float
+    clearance_mm: float
+    outward_heading_deg: float
 
 
 @dataclass(frozen=True)
@@ -31,7 +36,8 @@ class TableArea:
         us, vs = zip(*(point for segment in projected for point in segment))
         area = cls(min(us), max(us), min(vs), max(vs), angle)
         if (
-            abs(area.width - saved_map.axis_u_mm) > FIT_TOLERANCE_MM
+            min(area.width, area.depth) <= FIT_TOLERANCE_MM
+            or abs(area.width - saved_map.axis_u_mm) > FIT_TOLERANCE_MM
             or abs(area.depth - saved_map.axis_v_mm) > FIT_TOLERANCE_MM
             or not area._matches_edges(projected)
         ):
@@ -62,34 +68,22 @@ class TableArea:
     def depth(self):
         return self.v_max - self.v_min
 
-    def inset(self, distances):
-        return TableArea(
-            self.u_min + distances["u_min"],
-            self.u_max - distances["u_max"],
-            self.v_min + distances["v_min"],
-            self.v_max - distances["v_max"],
-            self.angle_deg,
-        )
-
-    def center(self):
-        uv = (self.u_min + self.width / 2, self.v_min + self.depth / 2)
-        return rotate_point(uv, self.angle_deg)
-
     def clearances(self, position):
         """各辺の内側なら正、外側なら負の距離を返す。"""
         u, v = rotate_point(position, -self.angle_deg)
         return (u - self.u_min, self.u_max - u, v - self.v_min, self.v_max - v)
 
-    def forward_room(self, position, heading):
-        """今の向きに直進するとき、最初に達する辺までの距離を返す。"""
+    def approaching_edge(self, position, heading):
+        """今の向きで最初に達する辺を返す。"""
         du, dv = heading_vector(heading - self.angle_deg)
-        outward_speeds = (-du, du, -dv, dv)
-        distances = self.clearances(position)
-        return min(
-            distance / speed
-            for distance, speed in zip(distances, outward_speeds)
+        normal_angles = (self.angle_deg + 180, self.angle_deg, self.angle_deg - 90, self.angle_deg + 90)
+        # 学習時との位置ずれを考慮し、推定した辺を越えていても外向きなら判定する。
+        approaches = (
+            EdgeApproach(max(0.0, clearance) / speed, clearance, normal)
+            for clearance, speed, normal in zip(self.clearances(position), (-du, du, -dv, dv), normal_angles)
             if speed > 1e-6
         )
+        return min(approaches, key=lambda edge: edge.travel_mm)
 
 
 def heading_vector(heading_deg):

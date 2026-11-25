@@ -85,6 +85,7 @@ class ArucoCoordinateTracker:
 
         self.running = False
         self._camera_handler = None
+        self._worker = None
         self._latest_raw_image = None
         self._latest_boxes = []
         self._latest_source_size = (320, 240)
@@ -114,10 +115,6 @@ class ArucoCoordinateTracker:
                 "y": float(self.cli.pose.position.y),
             }
         return {"id": self.robot_id, "x": 0.0, "y": 0.0}
-
-    def on_camera_image(self, cli, image):
-        with self._lock:
-            self._latest_raw_image = image.copy()
 
     def _estimate_marker_distance(self, pts):
         w_px = float(np.linalg.norm(pts[0] - pts[1]))
@@ -149,6 +146,8 @@ class ArucoCoordinateTracker:
                     frame = cozmo_image_to_bgr(raw_image)
                     src_h, src_w = frame.shape[:2]
                     corners, ids, _ = self._detect_markers(frame)
+                    if not self.running:
+                        break
 
                     boxes = []
                     if ids is not None and len(ids) > 0:
@@ -280,19 +279,40 @@ class ArucoCoordinateTracker:
     def start(self):
         if self.running:
             return
-        self.running = True
-        threading.Thread(target=self._tracker_loop, daemon=True).start()
+
+        worker = threading.Thread(target=self._tracker_loop, daemon=True)
+
+        def receive_image(cli, image):
+            with self._lock:
+                if self.running and self._worker is worker:
+                    self._latest_raw_image = image.copy()
+
         self._camera_handler = self.cli.add_handler(
-            pycozmo.event.EvtNewRawCameraImage, self.on_camera_image
+            pycozmo.event.EvtNewRawCameraImage, receive_image
         )
+        with self._lock:
+            self._worker = worker
+            self.running = True
+        try:
+            worker.start()
+        except RuntimeError:
+            self._worker = None
+            self.stop()
+            raise
 
     def stop(self):
-        self.running = False
-        if self._camera_handler is not None and hasattr(self.cli, "del_handler"):
-            try:
+        with self._lock:
+            self.running = False
+        try:
+            if self._camera_handler is not None and hasattr(self.cli, "del_handler"):
                 self.cli.del_handler(
                     pycozmo.event.EvtNewRawCameraImage, self._camera_handler
                 )
-            except Exception:
-                pass
-            self._camera_handler = None
+                self._camera_handler = None
+        finally:
+            if self._worker is not None:
+                self._worker.join()
+                self._worker = None
+            with self._lock:
+                self._latest_raw_image = None
+                self._latest_boxes = []

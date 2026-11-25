@@ -6,7 +6,7 @@ from algorithm.mapping.drive_map import DriveMap
 from data.roaming_map_files import MAP_DIRECTORY, list_records
 
 
-COZMO_SSID = "Cozmo_42A832"  # Cozmo本体のWi-Fi名に合わせる。
+COZMO_SSID = "Cozmo_613F59"  # Cozmo本体のWi-Fi名に合わせる。
 
 
 def main():
@@ -100,4 +100,5 @@ def _start_mode(robot, drive_map):
         show_map=True,
         telecom_config=TELECOM_CONFIG,
         map_data=map_data,
+        camera_enabled=None,
     )

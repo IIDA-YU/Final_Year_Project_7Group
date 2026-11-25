@@ -30,8 +30,8 @@ class _StopRequested(Exception):
 
 
 def roam_table(robot):
-    """段差を記録するための探索走行を開始する。"""
-    return drive_in_background(robot, _explore)
+    """段差センサーを使った探索走行を開始する。"""
+    return drive_in_background(robot, explore_table)
 
 
 @contextmanager
@@ -79,7 +79,16 @@ def _drive(robot, stop_requested, drive):
             print(f"机上走行を終了しました。{exc}", file=sys.stderr)
 
 
-def _explore(robot, read):
+def _drive_straight_until_cliff(robot, read, state):
+    forward_start = state.position
+    robot.drive_wheels(FORWARD_SPEED, FORWARD_SPEED)
+    while not state.cliff_detected:
+        state = read()
+    return state, forward_start
+
+
+def explore_table(robot, read, *, advance=_drive_straight_until_cliff):
+    """前進して段差を検知するたび、後退して別の向きに旋回する。"""
     state = read()
     if state.cliff_detected:
         raise RuntimeError("開始位置で段差を検知しました。")
@@ -90,12 +99,8 @@ def _explore(robot, read):
     initial_direction = -1
 
     while True:
-        forward_start = state.position
-        robot.drive_wheels(FORWARD_SPEED, FORWARD_SPEED)
         started_at = monotonic()
-        state = read()
-        while not state.cliff_detected:
-            state = read()
+        state, forward_start = advance(robot, read, state)
         robot.stop_all_motors()
 
         quick_detection = monotonic() - started_at <= CORNER_SECONDS
@@ -162,7 +167,7 @@ def _choose_turn(heading, turns, cliff_headings, initial_direction):
         for direction in (preferred_direction, -preferred_direction):
             target = heading + direction * angle
             if all(
-                abs(_angle_difference(target, old)) >= HEADING_MARGIN_DEG
+                abs(angle_difference(target, old)) >= HEADING_MARGIN_DEG
                 for old in old_headings
             ):
                 return direction, angle
@@ -170,11 +175,13 @@ def _choose_turn(heading, turns, cliff_headings, initial_direction):
     raise RuntimeError("同じ角で試せる旋回先が見つかりませんでした。")
 
 
-def turn_in_place(robot, read, state, direction, angle):
+def turn_in_place(
+    robot, read, state, direction, angle, *, speed=TURN_SPEED, tolerance=TURN_TOLERANCE_DEG,
+):
     previous_heading = state.heading_deg
     turned = 0.0
     deadline = monotonic() + TURN_TIMEOUT_SECONDS
-    speed = TURN_SPEED * direction
+    speed *= direction
     robot.drive_wheels(-speed, speed)
 
     while True:
@@ -182,10 +189,10 @@ def turn_in_place(robot, read, state, direction, angle):
         if state.cliff_detected:
             raise RuntimeError("旋回中に段差を検知しました。")
 
-        change = _angle_difference(state.heading_deg, previous_heading)
+        change = angle_difference(state.heading_deg, previous_heading)
         turned += direction * change
         previous_heading = state.heading_deg
-        if turned >= angle - TURN_TOLERANCE_DEG:
+        if turned >= angle - tolerance:
             break
         if turned < -15.0 or monotonic() >= deadline:
             raise RuntimeError("指定した方向・角度へ旋回できませんでした。")
@@ -194,17 +201,20 @@ def turn_in_place(robot, read, state, direction, angle):
     return wait_for_braking(read, require_clear=True)
 
 
-def wait_for_braking(read, require_clear=False):
+def wait_for_braking(read, require_clear=False, *, return_on_cliff=False):
     deadline = monotonic() + BRAKE_SECONDS
     while True:
         state = read()
-        if require_clear and state.cliff_detected:
-            raise RuntimeError("旋回直後に段差を検知しました。")
+        if state.cliff_detected:
+            if require_clear:
+                raise RuntimeError("旋回直後に段差を検知しました。")
+            if return_on_cliff:
+                return state
         if monotonic() >= deadline:
             return state
 
 
-def _angle_difference(target, reference):
+def angle_difference(target, reference):
     # 例: +179度から-179度に移ったときの変化は+2度。
     return (target - reference + 180.0) % 360.0 - 180.0
 
