@@ -35,6 +35,7 @@ class DriveMap:
         self._lock = Lock()
         self._edges = saved.edges
         self._trail = []
+        self._pawns = []
         self._pose = None
         self._paused = False
 
@@ -54,6 +55,15 @@ class DriveMap:
             self._pose = (*position, radians(heading))
             if not self._trail or dist(position, self._trail[-1]) >= TRAIL_INTERVAL_MM:
                 self._trail.append(position)
+
+    def record_pawns(self, positions):
+        """停止中に確定した駒の位置を記録する。"""
+        with self._lock:
+            self._pawns.extend(positions)
+
+    def pawn_positions(self):
+        with self._lock:
+            return tuple(self._pawns)
 
     def pause(self):
         with self._lock:

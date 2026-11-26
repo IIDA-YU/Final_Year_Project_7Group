@@ -20,12 +20,14 @@ RECENT_TRAIL = (225, 215, 60)
 EDGE = (75, 100, 255)
 BOUNDARY = (65, 210, 245)
 ROBOT = (130, 246, 155)
+PAWN = (75, 175, 255)
 TEXT = (222, 224, 224)
 
 
 class MapWindow:
     def __init__(self, map_data, camera_window_name, camera_width):
         self.map_data = map_data
+        self.pawn_positions = getattr(map_data, "pawn_positions", None)
         self.last_refresh = None
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
         cv2.moveWindow(camera_window_name, 24, 60)
@@ -44,11 +46,12 @@ class MapWindow:
             return
         trail, edges, pose, paused = self.map_data.snapshot()
         bounds = self.map_data.table_bounds()
-        cv2.imshow(WINDOW_NAME, draw_map(trail, edges, pose, paused, bounds))
+        pawns = None if self.pawn_positions is None else self.pawn_positions()
+        cv2.imshow(WINDOW_NAME, draw_map(trail, edges, pose, paused, bounds, pawns=pawns))
         self.last_refresh = now
 
 
-def draw_map(trail, edges, pose, paused, bounds=None):
+def draw_map(trail, edges, pose, paused, bounds=None, *, pawns=None):
     image = np.full((HEIGHT, WIDTH, 3), BACKGROUND, dtype=np.uint8)
     segments = () if bounds is None else bounds.segments_mm
     endpoints = [point for segment in segments for point in segment]
@@ -89,6 +92,9 @@ def draw_map(trail, edges, pose, paused, bounds=None):
         cv2.circle(image, (start_x, start_y), 5, ROBOT, -1, cv2.LINE_AA)
         cv2.arrowedLine(image, (start_x, start_y), arrow_end, ROBOT, 2, cv2.LINE_AA)
 
+    for pawn in pawns or ():
+        _draw_pawn(image, to_pixel(pawn), pawn)
+
     title = "Map paused" if paused else "Cozmo Map"
     _text(image, title, (16, 28), TEXT, 0.65)
     if pose is None:
@@ -99,7 +105,31 @@ def draw_map(trail, edges, pose, paused, bounds=None):
     _text(image, "Fitted edge", (181, 449), BOUNDARY)
     _text(image, "Cozmo", (303, 449), ROBOT)
     _text(image, "Circle: start point", (16, 469), TEXT)
+    if pawns is not None:
+        _text(image, "Pawn (x, y) cm", (181, 469), PAWN)
     return image
+
+
+def _draw_pawn(image, pixel, position):
+    x, y = pixel
+    # 駒の台座の下にある点が、検知したマップ座標。
+    body = np.array(
+        [(x - 8, y - 5), (x - 8, y - 9), (x - 4, y - 10), (x - 2, y - 16),
+         (x + 2, y - 16), (x + 4, y - 10), (x + 8, y - 9), (x + 8, y - 5)],
+        dtype=np.int32,
+    )
+    cv2.polylines(image, [body], True, BACKGROUND, 3, cv2.LINE_AA)
+    cv2.fillPoly(image, [body], PAWN, cv2.LINE_AA)
+    cv2.circle(image, (x, y - 19), 6, BACKGROUND, -1, cv2.LINE_AA)
+    cv2.circle(image, (x, y - 19), 4, PAWN, -1, cv2.LINE_AA)
+    cv2.circle(image, pixel, 4, BACKGROUND, -1, cv2.LINE_AA)
+    cv2.circle(image, pixel, 2, PAWN, -1, cv2.LINE_AA)
+    label = f"({position[0] / 10:.1f}, {position[1] / 10:.1f})"
+    (label_width, _), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.38, 1)
+    label_x = x + 11 if x + 11 + label_width < WIDTH - 5 else x - 11 - label_width
+    cv2.putText(image, label, (label_x, y - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.38,
+                BACKGROUND, 3, cv2.LINE_AA)
+    _text(image, label, (label_x, y - 6), PAWN, 0.38)
 
 
 def _size_label(bounds):
