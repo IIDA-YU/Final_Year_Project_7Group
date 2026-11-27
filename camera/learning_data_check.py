@@ -11,12 +11,11 @@ LEARNING_DATA_DIR = Path(__file__).resolve().parent.parent / "learningData"
 
 # 信頼度がこの値以上の物体を表示する。大きくすると判定が厳しくなる。
 CONFIDENCE_THRESHOLD = 0.5
-PAWN_MODEL_FILENAME = "best_chess_4.0.pt"
 
 # ファイル名、画面に表示する名前、枠の色（RGB）の順。
 MODEL_SETTINGS = (
-    ("best_powercube.pt", "Powercube", (0, 255, 0)),
-    (PAWN_MODEL_FILENAME, "Chess", (255, 180, 0)),
+    ("best_powercube.pt", "Power Cube", (0, 255, 0)),
+    ("best_chess_4.0.pt", "Chess", (255, 180, 0)),
 )
 
 
@@ -45,18 +44,16 @@ class LearningDataDetector:
                     )
                 )
 
-            self.models.append((filename, model, model_name, color))
+            self.models.append((model, model_name, color))
 
-    def detect_and_draw(self, image, *, on_pawns=None):
+    def detect_and_draw(self, image):
         """Pillow画像を受け取り、検知枠付きの新しい画像を返す。"""
         # 受信した画像は変更せず、描画用の画像を別に作る。
         source = image.convert("RGB")
         frame = source.copy()
         draw = ImageDraw.Draw(frame)
 
-        # 走行制御にはチェスモデルの結果を先に渡す。
-        models = reversed(self.models) if on_pawns is not None else self.models
-        for filename, model, model_name, color in models:
+        for model, model_name, color in self.models:
             # どちらのモデルにも、枠やバッテリー表示のない画像を渡す。
             results = model.predict(
                 source=source,
@@ -65,11 +62,10 @@ class LearningDataDetector:
             )
             result = results[0]
 
-            boxes = [] if result.boxes is None else result.boxes.xyxy.cpu().tolist()
-            if filename == PAWN_MODEL_FILENAME and on_pawns is not None:
-                on_pawns(boxes)
-            if not boxes:
+            if result.boxes is None:
                 continue
+
+            boxes = result.boxes.xyxy.cpu().tolist()
             scores = result.boxes.conf.cpu().tolist()
             class_ids = result.boxes.cls.cpu().tolist()
 

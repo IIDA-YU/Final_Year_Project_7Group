@@ -13,7 +13,6 @@ from PIL import Image, ImageDraw
 from algorithm.mapping.map_view import MapWindow
 from algorithm.mapping.roaming_map import RoamingMap
 from camera.camera_adjustment import CameraAdjustment, KEY_HELP, prepare_color_frame
-from camera.pawn_detection import PAWN_VIEW_HEAD_ANGLE_RAD, camera_intrinsics, capture_camera_pose
 from hardware.battery import draw_battery
 from telecommunication.session import EncounterCommSession
 
@@ -31,7 +30,7 @@ BUTTON_BOUNDS = {
 
 def show_camera(
     robot, drive=None, show_map=False, telecom_config=None, *, map_data=None,
-    camera_enabled=True, pawn_camera=None,
+    camera_enabled=True,
 ):
     """映像・走行・マップ表示を管理する。camera_enabled=None なら画面上の選択を待つ。"""
     detector = None
@@ -44,8 +43,6 @@ def show_camera(
 
     def start_camera():
         nonlocal detector, adjustment
-        if pawn_camera is not None:
-            pawn_camera.set_enabled(True)
         if detector is None:
             from camera.learning_data_check import LearningDataDetector
 
@@ -57,9 +54,7 @@ def show_camera(
         images = deque(maxlen=1)
 
         def receive_image(client, image):
-            received_at = time.monotonic()
-            pose = capture_camera_pose(client) if pawn_camera is not None else None
-            images.append((received_at, image.copy(), pose))
+            images.append((time.monotonic(), image.copy()))
 
         event = pycozmo.event.EvtNewRawCameraImage
         handler = robot.add_handler(event, receive_image)
@@ -69,8 +64,6 @@ def show_camera(
         if comm_session is not None:
             camera_resources.callback(comm_session.stop_tracking)
             comm_session.start_tracking()
-        if pawn_camera is not None:
-            robot.set_head_angle(PAWN_VIEW_HEAD_ANGLE_RAD)
         robot.enable_camera(enable=True, color=True)
         adjustment.start()
         return images, time.monotonic()
@@ -124,7 +117,7 @@ def show_camera(
         while True:
             now = time.monotonic()
             if camera_on:
-                received_at, image, pose = images[-1] if images else (started_at, None, None)
+                received_at, image = images[-1] if images else (started_at, None)
                 if now - received_at > IMAGE_TIMEOUT:
                     raise RuntimeError(
                         "カメラ画像を受信できません。"
@@ -138,14 +131,7 @@ def show_camera(
                         DISPLAY_SIZE,
                         Image.Resampling.BILINEAR,
                     )
-                    if pawn_camera is None:
-                        detected_frame = detector.detect_and_draw(frame)
-                    else:
-                        def on_pawns(boxes):
-                            pawn_camera.publish(
-                                received_at, pose, boxes, frame.size, camera_intrinsics(robot),
-                            )
-                        detected_frame = detector.detect_and_draw(frame, on_pawns=on_pawns)
+                    detected_frame = detector.detect_and_draw(frame)
                     processed_at = received_at
 
             if camera_on or now >= next_off_refresh:
@@ -189,8 +175,6 @@ def show_camera(
                         detected_frame = waiting_frame
                     else:
                         camera_resources.close()
-                        if pawn_camera is not None:
-                            pawn_camera.set_enabled(False)
                         images = None
                         detected_frame = off_frame
                     next_off_refresh = 0.0

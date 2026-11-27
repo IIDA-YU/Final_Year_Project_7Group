@@ -6,7 +6,7 @@ from algorithm.mapping.drive_map import DriveMap
 from data.roaming_map_files import MAP_DIRECTORY, list_records
 
 
-COZMO_SSID = "Cozmo_42A832"  # Cozmo本体のWi-Fi名に合わせる。
+COZMO_SSID = "Cozmo_613F59"  # Cozmo本体のWi-Fi名に合わせる。
 
 
 def main():
@@ -86,17 +86,14 @@ def _start_mode(robot, drive_map):
     from algorithm.mapped_driving import drive_on_map
     from algorithm.mapping.table_measurement import MeasurementMap, measure_table
     from camera.camera_movie import show_camera
-    from camera.pawn_detection import PawnCamera
     from telecommunication.config import TELECOM_CONFIG
 
-    pawn_camera = None
     if drive_map is None:
         map_data = MeasurementMap()
         drive = partial(measure_table, map_data=map_data)
     else:
         map_data = drive_map
-        pawn_camera = PawnCamera()
-        drive = partial(drive_on_map, drive_map=drive_map, pawn_camera=pawn_camera)
+        drive = partial(drive_on_map, drive_map=drive_map)
     show_camera(
         robot,
         drive=drive,
@@ -104,5 +101,4 @@ def _start_mode(robot, drive_map):
         telecom_config=TELECOM_CONFIG,
         map_data=map_data,
         camera_enabled=None,
-        pawn_camera=pawn_camera,
     )
