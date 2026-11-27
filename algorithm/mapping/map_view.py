@@ -8,7 +8,7 @@ import numpy as np
 
 
 WINDOW_NAME = "Cozmo Map"
-WIDTH, HEIGHT = 420, 480
+WIDTH, HEIGHT = 420, 550
 PLOT_TOP, PLOT_BOTTOM = 42, 402
 REFRESH_SECONDS = 0.1
 RECENT_POINTS = 35
@@ -21,13 +21,21 @@ EDGE = (75, 100, 255)
 BOUNDARY = (65, 210, 245)
 ROBOT = (130, 246, 155)
 TEXT = (222, 224, 224)
+CUBE_BUTTONS = {
+    "Start": ((16, 488, 196, 521), (255, 190, 110)),
+    "Goal": ((212, 488, 392, 521), (200, 130, 255)),
+}
 
 
 class MapWindow:
     def __init__(self, map_data, camera_window_name, camera_width):
         self.map_data = map_data
         self.last_refresh = None
+        self.cube_points = {}
+        self.pending_cube = None
+        self.projection = None
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
+        cv2.setMouseCallback(WINDOW_NAME, self._click)
         cv2.moveWindow(camera_window_name, 24, 60)
         cv2.moveWindow(WINDOW_NAME, 24 + camera_width + 28, 60)
         self.refresh()
@@ -44,11 +52,34 @@ class MapWindow:
             return
         trail, edges, pose, paused = self.map_data.snapshot()
         bounds = self.map_data.table_bounds()
-        cv2.imshow(WINDOW_NAME, draw_map(trail, edges, pose, paused, bounds))
+        image, projection = _render_map(
+            trail, edges, pose, paused, bounds, self.cube_points, self.pending_cube,
+        )
+        cv2.imshow(WINDOW_NAME, image)
+        self.projection = projection
         self.last_refresh = now
+
+    def _click(self, event, x, y, flags, user_data):
+        if event != cv2.EVENT_LBUTTONUP:
+            return
+        for name, ((left, top, right, bottom), _) in CUBE_BUTTONS.items():
+            if left <= x <= right and top <= y <= bottom:
+                self.pending_cube = None if self.pending_cube == name else name
+                self.last_refresh = None
+                return
+        if self.pending_cube and self.projection and 0 <= x < WIDTH and PLOT_TOP <= y <= PLOT_BOTTOM:
+            origin_x, origin_y, scale = self.projection
+            self.cube_points[self.pending_cube] = ((x - origin_x) / scale, (origin_y - y) / scale)
+            self.pending_cube = None
+            self.last_refresh = None
 
 
 def draw_map(trail, edges, pose, paused, bounds=None):
+    image, _ = _render_map(trail, edges, pose, paused, bounds, {}, None)
+    return image
+
+
+def _render_map(trail, edges, pose, paused, bounds, cube_points, pending_cube):
     image = np.full((HEIGHT, WIDTH, 3), BACKGROUND, dtype=np.uint8)
     segments = () if bounds is None else bounds.segments_mm
     endpoints = [point for segment in segments for point in segment]
@@ -59,14 +90,13 @@ def draw_map(trail, edges, pose, paused, bounds=None):
     span_x = max(300.0, max(xs) - min(xs) + 80.0)
     span_y = max(300.0, max(ys) - min(ys) + 80.0)
     scale = min((WIDTH - 36) / span_x, (PLOT_BOTTOM - PLOT_TOP - 24) / span_y)
+    origin_x = WIDTH / 2 - center_x * scale
+    origin_y = (PLOT_TOP + PLOT_BOTTOM) / 2 + center_y * scale
 
     def to_pixel(point):
         x, y = point
         # 地図のY軸は上向き、画像のY軸は下向き。
-        return (
-            round(WIDTH / 2 + (x - center_x) * scale),
-            round((PLOT_TOP + PLOT_BOTTOM) / 2 - (y - center_y) * scale),
-        )
+        return round(origin_x + x * scale), round(origin_y - y * scale)
 
     _draw_grid(image, to_pixel((0.0, 0.0)), round(100 * scale))
 
@@ -98,8 +128,27 @@ def draw_map(trail, edges, pose, paused, bounds=None):
     _text(image, "X  Edge hit", (80, 449), EDGE)
     _text(image, "Fitted edge", (181, 449), BOUNDARY)
     _text(image, "Cozmo", (303, 449), ROBOT)
-    _text(image, "Circle: start point", (16, 469), TEXT)
-    return image
+    _text(image, "Circle: start of trail", (16, 469), TEXT)
+
+    plot = image[PLOT_TOP:PLOT_BOTTOM + 1]
+    for name, ((left, top, right, bottom), color) in CUBE_BUTTONS.items():
+        if name in cube_points:
+            x, y = to_pixel(cube_points[name])
+            if 0 <= x < WIDTH and PLOT_TOP <= y <= PLOT_BOTTOM:
+                marker_y = y - PLOT_TOP
+                cv2.circle(plot, (x, marker_y), 10, color, cv2.FILLED, cv2.LINE_AA)
+                _text(plot, name[0], (x - 4, marker_y + 5), BACKGROUND)
+
+        active = name == pending_cube
+        cv2.rectangle(image, (left, top), (right, bottom), color, cv2.FILLED if active else 1)
+        label = f"{name} cube" + ("  [set]" if name in cube_points else "")
+        _text(image, label, (left + 10, top + 22), BACKGROUND if active else color)
+
+    hint = f"Click the map to place the {pending_cube.lower()} marker" if pending_cube else (
+        "Select a cube, then click the map"
+    )
+    _text(image, hint, (16, 541), TEXT)
+    return image, (origin_x, origin_y, scale)
 
 
 def _size_label(bounds):
