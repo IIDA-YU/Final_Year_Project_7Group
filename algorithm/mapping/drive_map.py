@@ -37,6 +37,57 @@ class DriveMap:
         self._trail = []
         self._pose = None
         self._paused = False
+        self._cube_points = {}
+        self._start_claimed = False
+        self._camera_on = False
+        self._cube_frame = None
+        self._status = "Select Start cube and turn camera ON"
+
+    def set_cube_point(self, name, point):
+        with self._lock:
+            if name == "Start":
+                if self._start_claimed:
+                    return "Start cube is locked for this run"
+                if min(self.table.clearances(point)) <= 0:
+                    return "Select a point inside the table"
+            self._cube_points[name] = point
+            return None
+
+    def cube_display(self):
+        with self._lock:
+            return self._cube_points.copy(), self._status
+
+    def set_status(self, status):
+        with self._lock:
+            self._status = status
+
+    def set_camera_on(self, enabled):
+        with self._lock:
+            self._camera_on = enabled
+            self._cube_frame = None
+
+    def record_cube_frame(self, received_at, size, boxes):
+        with self._lock:
+            if self._camera_on:
+                self._cube_frame = (received_at, size, boxes)
+
+    def cube_frame(self):
+        with self._lock:
+            return self._camera_on, self._cube_frame
+
+    def claim_start(self):
+        with self._lock:
+            if self._camera_on and self._cube_frame is not None and "Start" in self._cube_points:
+                self._start_claimed = True
+                return self._cube_points["Start"]
+            return None
+
+    def correct_start(self, point):
+        with self._lock:
+            if not self._camera_on:
+                raise RuntimeError("カメラがOFFになりました。")
+            self._cube_points["Start"] = point
+            self._status = "Start cube updated"
 
     def sensor_position(self, position, heading):
         x, y = position

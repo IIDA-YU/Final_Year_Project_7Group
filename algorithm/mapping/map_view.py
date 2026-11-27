@@ -34,6 +34,7 @@ class MapWindow:
         self.cube_points = {}
         self.pending_cube = None
         self.projection = None
+        self.click_error = None
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
         cv2.setMouseCallback(WINDOW_NAME, self._click)
         cv2.moveWindow(camera_window_name, 24, 60)
@@ -52,8 +53,13 @@ class MapWindow:
             return
         trail, edges, pose, paused = self.map_data.snapshot()
         bounds = self.map_data.table_bounds()
+        cube_points, status = (
+            self.map_data.cube_display() if hasattr(self.map_data, "cube_display")
+            else (self.cube_points, None)
+        )
         image, projection = _render_map(
-            trail, edges, pose, paused, bounds, self.cube_points, self.pending_cube,
+            trail, edges, pose, paused, bounds, cube_points, self.pending_cube,
+            self.click_error or status,
         )
         cv2.imshow(WINDOW_NAME, image)
         self.projection = projection
@@ -64,12 +70,17 @@ class MapWindow:
             return
         for name, ((left, top, right, bottom), _) in CUBE_BUTTONS.items():
             if left <= x <= right and top <= y <= bottom:
+                self.click_error = None
                 self.pending_cube = None if self.pending_cube == name else name
                 self.last_refresh = None
                 return
         if self.pending_cube and self.projection and 0 <= x < WIDTH and PLOT_TOP <= y <= PLOT_BOTTOM:
             origin_x, origin_y, scale = self.projection
-            self.cube_points[self.pending_cube] = ((x - origin_x) / scale, (origin_y - y) / scale)
+            point = ((x - origin_x) / scale, (origin_y - y) / scale)
+            if hasattr(self.map_data, "set_cube_point"):
+                self.click_error = self.map_data.set_cube_point(self.pending_cube, point)
+            else:
+                self.cube_points[self.pending_cube] = point
             self.pending_cube = None
             self.last_refresh = None
 
@@ -79,7 +90,7 @@ def draw_map(trail, edges, pose, paused, bounds=None):
     return image
 
 
-def _render_map(trail, edges, pose, paused, bounds, cube_points, pending_cube):
+def _render_map(trail, edges, pose, paused, bounds, cube_points, pending_cube, status=None):
     image = np.full((HEIGHT, WIDTH, 3), BACKGROUND, dtype=np.uint8)
     segments = () if bounds is None else bounds.segments_mm
     endpoints = [point for segment in segments for point in segment]
@@ -145,7 +156,7 @@ def _render_map(trail, edges, pose, paused, bounds, cube_points, pending_cube):
         _text(image, label, (left + 10, top + 22), BACKGROUND if active else color)
 
     hint = f"Click the map to place the {pending_cube.lower()} marker" if pending_cube else (
-        "Select a cube, then click the map"
+        status or "Select a cube, then click the map"
     )
     _text(image, hint, (16, 541), TEXT)
     return image, (origin_x, origin_y, scale)

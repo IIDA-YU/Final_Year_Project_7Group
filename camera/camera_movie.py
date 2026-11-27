@@ -10,6 +10,7 @@ import numpy as np
 import pycozmo
 from PIL import Image, ImageDraw
 
+from algorithm.mapping.drive_map import DriveMap
 from algorithm.mapping.map_view import MapWindow
 from algorithm.mapping.roaming_map import RoamingMap
 from camera.camera_adjustment import CameraAdjustment, KEY_HELP, prepare_color_frame
@@ -97,6 +98,7 @@ def show_camera(
             map_data = resources.enter_context(RoamingMap(robot))
         if show_map:
             map_window = MapWindow(map_data, WINDOW_NAME, DISPLAY_SIZE[0])
+        cube_map = map_data if isinstance(map_data, DriveMap) else None
         if telecom_config is not None:
             comm_session = resources.enter_context(
                 EncounterCommSession(
@@ -105,6 +107,8 @@ def show_camera(
             )
         if camera_on:
             images, started_at = start_camera()
+            if cube_map is not None:
+                cube_map.set_camera_on(True)
         else:
             robot.enable_camera(enable=False)
 
@@ -131,7 +135,10 @@ def show_camera(
                         DISPLAY_SIZE,
                         Image.Resampling.BILINEAR,
                     )
-                    detected_frame = detector.detect_and_draw(frame)
+                    cube_boxes = [] if cube_map is not None else None
+                    detected_frame = detector.detect_and_draw(frame, cube_boxes=cube_boxes)
+                    if cube_map is not None:
+                        cube_map.record_cube_frame(received_at, frame.size, tuple(cube_boxes))
                     processed_at = received_at
 
             if camera_on or now >= next_off_refresh:
@@ -170,6 +177,8 @@ def show_camera(
 
             if requested_camera is not None:
                 if requested_camera != camera_on:
+                    if cube_map is not None:
+                        cube_map.set_camera_on(requested_camera)
                     if requested_camera:
                         images, started_at = start_camera()
                         detected_frame = waiting_frame

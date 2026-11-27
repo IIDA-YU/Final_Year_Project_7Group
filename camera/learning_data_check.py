@@ -46,7 +46,7 @@ class LearningDataDetector:
 
             self.models.append((model, model_name, color))
 
-    def detect_and_draw(self, image):
+    def detect_and_draw(self, image, *, cube_boxes=None):
         """Pillow画像を受け取り、検知枠付きの新しい画像を返す。"""
         # 受信した画像は変更せず、描画用の画像を別に作る。
         source = image.convert("RGB")
@@ -70,6 +70,8 @@ class LearningDataDetector:
             class_ids = result.boxes.cls.cpu().tolist()
 
             for box, score, class_id in zip(boxes, scores, class_ids):
+                if cube_boxes is not None and model_name == "Power Cube":
+                    cube_boxes.append(tuple(box))
                 x1, y1, x2, y2 = [int(value) for value in box]
 
                 draw.rectangle(
